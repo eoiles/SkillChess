@@ -1,4 +1,5 @@
 using UnityEngine;
+using DG.Tweening;
 
 public class BoardGeneratorFixed : MonoBehaviour
 {
@@ -24,6 +25,42 @@ public class BoardGeneratorFixed : MonoBehaviour
 
     [Header("Tile Highlight (optional)")]
     public Material tileHighlightMaterial; // optional; if null, TileView will auto-create
+
+    public enum TileSpawnEffect
+    {
+        None,
+        ScalePop,
+        RaiseFromBelow,
+        DropFromAbove,
+        SlideFromRight,
+        SlideFromLeft,
+        SpinAndPop,
+        PunchScale
+    }
+
+    [Header("DOTween Spawn (does NOT change final layout)")]
+    public bool animateTiles = true;
+    public TileSpawnEffect tileSpawnEffect = TileSpawnEffect.ScalePop;
+
+    [Min(0f)] public float spawnDuration = 0.25f;
+    [Min(0f)] public float spawnStagger = 0.005f;
+
+    [Tooltip("World-space distance for Raise/Drop (uses board's up direction).")]
+    public float verticalDistance = 0.5f;
+
+    [Tooltip("World-space distance for Slide (uses board's right direction).")]
+    public float horizontalDistance = 0.5f;
+
+    public Ease moveEase = Ease.OutCubic;
+    public Ease scaleEase = Ease.OutBack;
+
+    [Tooltip("Spin degrees used by SpinAndPop.")]
+    public float spinDegrees = 180f;
+
+    [Tooltip("Punch amount used by PunchScale.")]
+    public float punchAmount = 0.12f;
+    public int punchVibrato = 10;
+    [Range(0f, 1f)] public float punchElasticity = 0.6f;
 
     void Start()
     {
@@ -80,8 +117,97 @@ public class BoardGeneratorFixed : MonoBehaviour
                 tv.Setup(squareName);
                 if (tileHighlightMaterial != null)
                     tv.highlightMaterial = tileHighlightMaterial;
+
+                if (animateTiles && tileSpawnEffect != TileSpawnEffect.None)
+                {
+                    // Delay strictly matches your original spawn order: file loop then rank loop
+                    int index = file * height + rank;
+                    ApplyTileSpawnEffect(tile.transform, worldPos, index);
+                }
             }
         }
+    }
+
+    void ApplyTileSpawnEffect(Transform t, Vector3 targetPos, int index)
+    {
+        // Preserve prefab's instantiated scale/rotation (so layout stays identical)
+        Vector3 targetScale = t.localScale;
+        Quaternion targetRot = t.rotation;
+
+        // Use board orientation for offsets
+        Vector3 up = transform.up;
+        Vector3 right = transform.right;
+
+        float delay = index * spawnStagger;
+
+        t.DOKill();
+
+        switch (tileSpawnEffect)
+        {
+            case TileSpawnEffect.ScalePop:
+                t.position = targetPos;
+                t.localScale = Vector3.zero;
+                t.DOScale(targetScale, spawnDuration).SetDelay(delay).SetEase(scaleEase);
+                break;
+
+            case TileSpawnEffect.RaiseFromBelow:
+                t.position = targetPos - up * verticalDistance;
+                t.localScale = targetScale;
+                t.DOMove(targetPos, spawnDuration).SetDelay(delay).SetEase(moveEase);
+                break;
+
+            case TileSpawnEffect.DropFromAbove:
+                t.position = targetPos + up * verticalDistance;
+                t.localScale = targetScale;
+                t.DOMove(targetPos, spawnDuration).SetDelay(delay).SetEase(Ease.OutBounce);
+                break;
+
+            case TileSpawnEffect.SlideFromRight:
+                t.position = targetPos + right * horizontalDistance;
+                t.localScale = targetScale;
+                t.DOMove(targetPos, spawnDuration).SetDelay(delay).SetEase(moveEase);
+                break;
+
+            case TileSpawnEffect.SlideFromLeft:
+                t.position = targetPos - right * horizontalDistance;
+                t.localScale = targetScale;
+                t.DOMove(targetPos, spawnDuration).SetDelay(delay).SetEase(moveEase);
+                break;
+
+            case TileSpawnEffect.SpinAndPop:
+                t.position = targetPos;
+                t.localScale = Vector3.zero;
+                t.rotation = targetRot;
+
+                t.DOScale(targetScale, spawnDuration)
+                    .SetDelay(delay)
+                    .SetEase(scaleEase);
+
+                // Spin around Y but end exactly at targetRot
+                t.DORotateQuaternion(targetRot * Quaternion.Euler(0f, spinDegrees, 0f), spawnDuration)
+                    .From(targetRot * Quaternion.Euler(0f, -spinDegrees, 0f))
+                    .SetDelay(delay)
+                    .SetEase(Ease.OutCubic);
+                break;
+
+            case TileSpawnEffect.PunchScale:
+                t.position = targetPos;
+                t.localScale = targetScale;
+                t.DOPunchScale(Vector3.one * punchAmount, spawnDuration, punchVibrato, punchElasticity)
+                    .SetDelay(delay);
+                break;
+        }
+
+        // Safety: force final values when tween completes (layout guaranteed)
+        DOTween.Sequence()
+            .SetDelay(delay + spawnDuration)
+            .AppendCallback(() =>
+            {
+                if (t == null) return;
+                t.position = targetPos;
+                t.localScale = targetScale;
+                t.rotation = targetRot;
+            });
     }
 
     static string ToSquareName(int file, int rank)

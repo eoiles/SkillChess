@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 4289106002160691396}
   - component: {fileID: 2535125609687357888}
   - component: {fileID: 7368350978764222121}
-  - component: {fileID: 3792195076122135267}
+  - component: {fileID: -5895584212553463512}
   m_Layer: 0
   m_Name: Rook
   m_TagString: Untagged
@@ -87,8 +87,8 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!65 &3792195076122135267
-BoxCollider:
+--- !u!64 &-5895584212553463512
+MeshCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
@@ -105,6 +105,7 @@ BoxCollider:
   m_IsTrigger: 0
   m_ProvidesContacts: 0
   m_Enabled: 1
-  serializedVersion: 3
-  m_Size: {x: 2.9777622, y: 4.4127707, z: 2.9777622}
-  m_Center: {x: -0.002276659, y: 1.5658838, z: 0.00015926361}
+  serializedVersion: 5
+  m_Convex: 0
+  m_CookingOptions: 30
+  m_Mesh: {fileID: 2534964839176971238, guid: d75a1dea68a071a4793fa61c4dde139b, type: 3}

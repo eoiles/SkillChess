@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 5048443937661829999}
   - component: {fileID: 8121616656253781451}
   - component: {fileID: 3367502582001745602}
-  - component: {fileID: -1154583743967686855}
+  - component: {fileID: -6731272755430128543}
   m_Layer: 0
   m_Name: Queen
   m_TagString: Untagged
@@ -87,8 +87,8 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!65 &-1154583743967686855
-BoxCollider:
+--- !u!64 &-6731272755430128543
+MeshCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
@@ -105,6 +105,7 @@ BoxCollider:
   m_IsTrigger: 0
   m_ProvidesContacts: 0
   m_Enabled: 1
-  serializedVersion: 3
-  m_Size: {x: 2.9777622, y: 6.5288343, z: 2.9777622}
-  m_Center: {x: -0.002276659, y: 2.6239157, z: 0.00015926361}
+  serializedVersion: 5
+  m_Convex: 0
+  m_CookingOptions: 30
+  m_Mesh: {fileID: 2534964839176971238, guid: 91fd29d2e566f0345826df1149421a29, type: 3}

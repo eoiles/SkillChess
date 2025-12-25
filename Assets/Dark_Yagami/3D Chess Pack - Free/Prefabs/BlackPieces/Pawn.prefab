@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 7113276120376432749}
   - component: {fileID: 781041481497395156}
   - component: {fileID: 172828577350401981}
-  - component: {fileID: -6229980344965448776}
+  - component: {fileID: 5923946397957090400}
   m_Layer: 0
   m_Name: Pawn
   m_TagString: Untagged
@@ -87,8 +87,8 @@ MeshRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 0
   m_AdditionalVertexStreams: {fileID: 0}
---- !u!65 &-6229980344965448776
-BoxCollider:
+--- !u!64 &5923946397957090400
+MeshCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
@@ -105,6 +105,7 @@ BoxCollider:
   m_IsTrigger: 0
   m_ProvidesContacts: 0
   m_Enabled: 1
-  serializedVersion: 3
-  m_Size: {x: 2.4273005, y: 3.8454316, z: 2.4273005}
-  m_Center: {x: 0, y: 1.282214, z: 0}
+  serializedVersion: 5
+  m_Convex: 0
+  m_CookingOptions: 30
+  m_Mesh: {fileID: 2534964839176971238, guid: a61d2d3eaf1cec449842a88fd595b6a5, type: 3}
