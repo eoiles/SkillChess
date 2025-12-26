@@ -1,3 +1,4 @@
+// ChessGameController.cs
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -12,6 +13,12 @@ public class ChessGameController : MonoBehaviour
     public PieceInitializer pieceInitializer;
     public ChessUIController ui;
 
+    [Header("Restart Timing")]
+    [Min(0f)] public float extraDelayAfterTiles = 0.05f;
+
+    [Header("Move Animation / Input")]
+    public bool lockInputDuringMoveAnimation = true;
+
     [Header("Game State")]
     public PieceColor sideToMove = PieceColor.White;
     public bool gameOver = false;
@@ -19,9 +26,12 @@ public class ChessGameController : MonoBehaviour
     public ChessMove? lastMove = null;
     public string statusMessage = "Waiting for pieces...";
 
+    bool isMoveInProgress = false;
+
     void Awake()
     {
-        DOTween.SetTweensCapacity(1000, 50);
+        DOTween.SetTweensCapacity(1000, 100);
+
         if (boardGenerator == null) boardGenerator = FindObjectOfType<BoardGeneratorFixed>();
         if (board == null) board = FindObjectOfType<ChessBoardIndex>();
         if (executor == null) executor = FindObjectOfType<ChessMoveExecutor>();
@@ -43,7 +53,7 @@ public class ChessGameController : MonoBehaviour
             pieceInitializer.OnPiecesInitialized += OnPiecesInitialized;
         }
 
-        RefreshUI();
+        RestartGame();
     }
 
     void OnDestroy()
@@ -57,9 +67,77 @@ public class ChessGameController : MonoBehaviour
         sideToMove = PieceColor.White;
         lastMove = null;
         gameOver = false;
+        isMoveInProgress = false;
 
         UpdateStatusMessage();
         RefreshUI();
+    }
+
+    public void RestartGame()
+    {
+        // Ensure any in-flight tweens are stopped so state can’t “finish later”
+        DOTween.KillAll(false);
+
+        StopAllCoroutines();
+        StartCoroutine(RestartRoutine());
+    }
+
+    IEnumerator RestartRoutine()
+    {
+        statusMessage = "Restarting...";
+        RefreshUI();
+
+        // Stop selection/highlights + (optional) stop clicks during restart
+        var input = FindObjectOfType<ChessInputController>();
+        if (input != null)
+        {
+            input.Deselect();
+            if (lockInputDuringMoveAnimation) input.enabled = false;
+        }
+
+        isMoveInProgress = false;
+        gameOver = false;
+        sideToMove = PieceColor.White;
+        lastMove = null;
+
+        // IMPORTANT: prevent auto-spawn from other scripts
+        if (boardGenerator != null) boardGenerator.generateOnStart = false;
+        if (pieceInitializer != null) pieceInitializer.autoInitializeOnStart = false;
+
+        // 1) Clear pieces first so nothing overlaps
+        if (pieceInitializer != null)
+        {
+            pieceInitializer.ClearPiecesOnly();
+            yield return null; // let Destroy() remove colliders
+        }
+
+        // 2) Tiles
+        if (boardGenerator != null)
+        {
+            boardGenerator.GenerateBoard();
+            yield return null; // let tile colliders exist
+        }
+
+        // 3) Wait for tile animation to finish BEFORE pieces
+        float tileAnim = boardGenerator != null ? boardGenerator.GetTotalTileAnimTime() : 0f;
+        if (tileAnim > 0f)
+            yield return new WaitForSeconds(tileAnim + extraDelayAfterTiles);
+
+        // 4) Refresh board tile cache if needed (safe no-op if not implemented)
+        if (board != null)
+        {
+            board.SendMessage("RebuildTiles", SendMessageOptions.DontRequireReceiver);
+            board.SendMessage("CacheTiles", SendMessageOptions.DontRequireReceiver);
+            board.ClearAllTileHighlights();
+        }
+
+        // 5) Pieces
+        if (pieceInitializer != null)
+            pieceInitializer.InitializePieces();
+
+        // Re-enable input after pieces spawn
+        if (input != null && lockInputDuringMoveAnimation)
+            input.enabled = true;
     }
 
     public Dictionary<string, ChessMove> GetLegalMoveMap(PieceData piece)
@@ -68,6 +146,7 @@ public class ChessGameController : MonoBehaviour
 
         if (board == null || piece == null) return map;
         if (gameOver) return map;
+        if (isMoveInProgress) return map;
         if (piece.color != sideToMove) return map;
 
         var occ = board.BuildOccupancy(out bool hasBothKings);
@@ -80,10 +159,15 @@ public class ChessGameController : MonoBehaviour
         return map;
     }
 
+    /// <summary>
+    /// Validates move and starts an animation coroutine (or instant move, depending on executor settings).
+    /// Returns true if the move was accepted/started.
+    /// </summary>
     public bool TryApplyMove(PieceData movingPiece, ChessMove move)
     {
         if (board == null || executor == null) return false;
         if (gameOver) return false;
+        if (isMoveInProgress) return false;
         if (movingPiece == null) return false;
         if (movingPiece.color != sideToMove) return false;
 
@@ -91,17 +175,48 @@ public class ChessGameController : MonoBehaviour
         if (!map.TryGetValue(move.to, out var legalMove))
             return false;
 
-        executor.ExecuteMove(movingPiece, legalMove, lastMove);
-        lastMove = legalMove;
+        StartCoroutine(ApplyMoveRoutine(movingPiece, legalMove));
+        return true;
+    }
 
+    IEnumerator ApplyMoveRoutine(PieceData movingPiece, ChessMove legalMove)
+    {
+        isMoveInProgress = true;
+
+        // Stop selection/highlights and lock input during animation
+        var input = FindObjectOfType<ChessInputController>();
+        if (input != null)
+        {
+            input.Deselect();
+            if (lockInputDuringMoveAnimation) input.enabled = false;
+        }
+        if (board != null) board.ClearAllTileHighlights();
+
+        PieceData resultPiece = movingPiece;
+
+        // If you didn’t paste the animated executor yet, this still works because ExecuteMoveAnimated
+        // falls back to instant when animateMoves = false.
+        Sequence seq = executor.ExecuteMoveAnimated(movingPiece, legalMove, lastMove, pd => resultPiece = pd);
+
+        if (seq != null)
+            yield return seq.WaitForCompletion();
+        else
+            yield return null;
+
+        // Apply turn/state AFTER movement finished (prevents mid-animation logic/input issues)
+        lastMove = legalMove;
         sideToMove = (sideToMove == PieceColor.White) ? PieceColor.Black : PieceColor.White;
 
         EvaluateEndConditions();
-        if (!gameOver)
-            UpdateStatusMessage();
+        if (!gameOver) UpdateStatusMessage();
 
         RefreshUI();
-        return true;
+
+        // Re-enable input
+        if (input != null && lockInputDuringMoveAnimation)
+            input.enabled = true;
+
+        isMoveInProgress = false;
     }
 
     void UpdateStatusMessage()
@@ -143,15 +258,9 @@ public class ChessGameController : MonoBehaviour
         bool inCheck = ChessRules.IsKingInCheck(sideToMove, occ);
         gameOver = true;
 
-        if (inCheck)
-        {
-            PieceColor winner = (sideToMove == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-            statusMessage = $"CHECKMATE! {winner} wins.";
-        }
-        else
-        {
-            statusMessage = "STALEMATE! Draw.";
-        }
+        statusMessage = inCheck
+            ? $"CHECKMATE! {(sideToMove == PieceColor.White ? PieceColor.Black : PieceColor.White)} wins."
+            : "STALEMATE! Draw.";
     }
 
     bool SideHasAnyLegalMove(PieceColor side, PieceData[,] occ)
@@ -166,44 +275,6 @@ public class ChessGameController : MonoBehaviour
             if (legal.Count > 0) return true;
         }
         return false;
-    }
-
-    public void RestartGame()
-    {
-        StopAllCoroutines();
-
-        gameOver = false;
-        sideToMove = PieceColor.White;
-        lastMove = null;
-        statusMessage = "Restarting...";
-
-        // Board first, then pieces (next frame)
-        StartCoroutine(RestartSequence());
-    }
-
-    IEnumerator RestartSequence()
-    {
-        // 1) Respawn board tiles
-        if (boardGenerator != null)
-            boardGenerator.GenerateBoard();
-        else
-            Debug.LogWarning("BoardGeneratorFixed not assigned; tiles will not respawn.");
-
-        // Let Unity finish destroying/instantiating tiles this frame
-        yield return null;
-
-        // 2) Clear highlights (tiles are new)
-        if (board != null)
-            board.ClearAllTileHighlights();
-
-        // 3) Respawn pieces
-        if (pieceInitializer != null)
-            pieceInitializer.InitializePieces(); // triggers OnPiecesInitialized
-        else
-        {
-            statusMessage = "Assign PieceInitializer to restart.";
-            RefreshUI();
-        }
     }
 
     void RefreshUI()

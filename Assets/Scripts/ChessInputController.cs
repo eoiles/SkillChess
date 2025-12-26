@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 public class ChessInputController : MonoBehaviour
 {
@@ -7,6 +8,7 @@ public class ChessInputController : MonoBehaviour
     public Camera cam;
     public ChessBoardIndex board;
     public ChessGameController game;
+    public PieceInitializer pieceInitializer;
 
     [Header("Raycast")]
     public LayerMask raycastMask = ~0;
@@ -18,6 +20,32 @@ public class ChessInputController : MonoBehaviour
     void Awake()
     {
         if (cam == null) cam = Camera.main;
+        if (board == null) board = FindObjectOfType<ChessBoardIndex>();
+        if (game == null) game = FindObjectOfType<ChessGameController>();
+        if (pieceInitializer == null) pieceInitializer = FindObjectOfType<PieceInitializer>();
+    }
+
+    void OnEnable()
+    {
+        if (pieceInitializer != null)
+        {
+            pieceInitializer.OnPiecesInitialized -= OnPiecesInitialized;
+            pieceInitializer.OnPiecesInitialized += OnPiecesInitialized;
+        }
+    }
+
+    void OnDisable()
+    {
+        if (pieceInitializer != null)
+            pieceInitializer.OnPiecesInitialized -= OnPiecesInitialized;
+    }
+
+    void OnPiecesInitialized()
+    {
+        // Ensure we don't keep references to destroyed pieces after restart.
+        Deselect();
+
+        // Re-find in case objects were recreated / references changed.
         if (board == null) board = FindObjectOfType<ChessBoardIndex>();
         if (game == null) game = FindObjectOfType<ChessGameController>();
     }
@@ -32,17 +60,19 @@ public class ChessInputController : MonoBehaviour
 
     void HandleClick()
     {
+        // Prevent the "Restart" click from also raycasting the 3D world.
+        if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
+            return;
+
         if (cam == null) return;
 
         Ray ray = cam.ScreenPointToRay(Input.mousePosition);
         if (!Physics.Raycast(ray, out RaycastHit hit, 1000f, raycastMask))
             return;
 
-        // Click piece?
         var piece = hit.collider.GetComponentInParent<PieceData>();
         if (piece != null)
         {
-            // If we already selected and clicked enemy => capture attempt
             if (selectedPiece != null && piece.color != selectedPiece.color)
             {
                 TryMoveTo(piece.currentSquare);
@@ -53,7 +83,6 @@ public class ChessInputController : MonoBehaviour
             return;
         }
 
-        // Click tile?
         var tile = hit.collider.GetComponentInParent<TileView>();
         if (tile != null)
         {
