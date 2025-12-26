@@ -1,6 +1,6 @@
 using UnityEngine;
 using DG.Tweening;
-using System.Collections.Generic; 
+using System.Collections.Generic;
 
 public class BoardGeneratorFixed : MonoBehaviour
 {
@@ -26,6 +26,9 @@ public class BoardGeneratorFixed : MonoBehaviour
 
     [Header("Tile Highlight (optional)")]
     public Material tileHighlightMaterial;
+
+    [Tooltip("If true, newly spawned tiles are forced to NOT highlighted to avoid highlight flash during spawn.")]
+    public bool forceTilesNotHighlightedOnSpawn = true;
 
     [Header("Auto")]
     public bool generateOnStart = false; // keep false if GameController controls order
@@ -122,7 +125,7 @@ public class BoardGeneratorFixed : MonoBehaviour
         for (int i = transform.childCount - 1; i >= 0; i--)
         {
             var child = transform.GetChild(i);
-            child.DOKill(true);
+            if (child != null) child.DOKill(true);
 
 #if UNITY_EDITOR
             if (!Application.isPlaying) DestroyImmediate(child.gameObject);
@@ -136,8 +139,6 @@ public class BoardGeneratorFixed : MonoBehaviour
         Vector3 rankDir = (rankDirLocal.sqrMagnitude < 0.0001f) ? Vector3.back : rankDirLocal.normalized;
 
         int total = width * height;
-
-        // Precompute an index (0..total-1) for each tile depending on order setting.
         int[] orderIndex = BuildOrderIndex(total);
 
         for (int file = 0; file < width; file++)
@@ -155,35 +156,77 @@ public class BoardGeneratorFixed : MonoBehaviour
                 tile.name = squareName;
 
                 bool isBlack = ((file + rank) % 2 == 0);
-                var r = tile.GetComponent<Renderer>();
-                if (r != null) r.sharedMaterial = isBlack ? blackMat : whiteMat;
+
+                // IMPORTANT:
+                // Apply base material to ALL renderers and ALL material slots.
+                // This prevents “top face” (2nd material slot) from flashing magenta.
+                ApplyBaseMaterialAllSlots(tile, isBlack ? blackMat : whiteMat);
 
                 if (tile.GetComponent<Collider>() == null)
                     tile.AddComponent<BoxCollider>();
 
                 var tv = tile.GetComponent<TileView>();
                 if (tv == null) tv = tile.AddComponent<TileView>();
+
                 tv.Setup(squareName);
+
+                // Assign highlight material if provided
                 if (tileHighlightMaterial != null)
                     tv.highlightMaterial = tileHighlightMaterial;
 
+                // CRITICAL:
+                // Force newly created tiles to start NOT highlighted to prevent highlight flash during spawn.
+                if (forceTilesNotHighlightedOnSpawn)
+                {
+                    // Avoid compile issues if you rename methods later:
+                    // Try direct call (most likely exists) + fallback SendMessage.
+                    try
+                    {
+                        tv.SetHighlighted(false);
+                    }
+                    catch
+                    {
+                        tile.SendMessage("SetHighlighted", false, SendMessageOptions.DontRequireReceiver);
+                    }
+                }
+
                 if (animateTiles && tileSpawnEffect != TileSpawnEffect.None)
                 {
-                    // Map (file,rank) to a tile id 0..total-1 (original loop order id),
-                    // then map that id to the chosen animation order index.
                     int id = file * height + rank;
                     int index = orderIndex[id];
-
                     ApplyTileSpawnEffect(tile.transform, worldPos, index);
                 }
             }
         }
     }
 
+    static void ApplyBaseMaterialAllSlots(GameObject tile, Material mat)
+    {
+        if (tile == null || mat == null) return;
+
+        // handle root + child renderers
+        var renderers = tile.GetComponentsInChildren<Renderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            var r = renderers[i];
+            if (r == null) continue;
+
+            var mats = r.sharedMaterials;
+            if (mats == null || mats.Length == 0)
+            {
+                r.sharedMaterial = mat;
+                continue;
+            }
+
+            for (int m = 0; m < mats.Length; m++)
+                mats[m] = mat;
+
+            r.sharedMaterials = mats;
+        }
+    }
+
     int[] BuildOrderIndex(int total)
     {
-        // orderIndex[id] = index (0..total-1) when this tile should animate
-        // id = file*height+rank
         int[] orderIndex = new int[total];
 
         switch (tileAnimOrder)
@@ -193,93 +236,88 @@ public class BoardGeneratorFixed : MonoBehaviour
                 break;
 
             case TileAnimOrder.SnakeByRanks:
+            {
+                int idx = 0;
+                for (int rank = 0; rank < height; rank++)
                 {
-                    // rank-major snake: A1..H1 then H2..A2 etc.
-                    int idx = 0;
-                    for (int rank = 0; rank < height; rank++)
+                    bool leftToRight = (rank % 2 == 0);
+                    if (leftToRight)
                     {
-                        bool leftToRight = (rank % 2 == 0);
-                        if (leftToRight)
-                        {
-                            for (int file = 0; file < width; file++)
-                                orderIndex[file * height + rank] = idx++;
-                        }
-                        else
-                        {
-                            for (int file = width - 1; file >= 0; file--)
-                                orderIndex[file * height + rank] = idx++;
-                        }
+                        for (int file = 0; file < width; file++)
+                            orderIndex[file * height + rank] = idx++;
+                    }
+                    else
+                    {
+                        for (int file = width - 1; file >= 0; file--)
+                            orderIndex[file * height + rank] = idx++;
                     }
                 }
-                break;
+            }
+            break;
 
             case TileAnimOrder.SnakeByFiles:
+            {
+                int idx = 0;
+                for (int file = 0; file < width; file++)
                 {
-                    // file-major snake: A1..A8 then B8..B1 etc.
-                    int idx = 0;
-                    for (int file = 0; file < width; file++)
-                    {
-                        bool bottomToTop = (file % 2 == 0);
-                        if (bottomToTop)
-                        {
-                            for (int rank = 0; rank < height; rank++)
-                                orderIndex[file * height + rank] = idx++;
-                        }
-                        else
-                        {
-                            for (int rank = height - 1; rank >= 0; rank--)
-                                orderIndex[file * height + rank] = idx++;
-                        }
-                    }
-                }
-                break;
-
-            case TileAnimOrder.SpiralInward:
-                {
-                    // spiral path: outside -> inside
-                    int idx = 0;
-                    int left = 0, right = width - 1, bottom = 0, top = height - 1;
-
-                    while (left <= right && bottom <= top)
-                    {
-                        for (int x = left; x <= right; x++)
-                            orderIndex[x * height + bottom] = idx++;
-
-                        for (int y = bottom + 1; y <= top; y++)
-                            orderIndex[right * height + y] = idx++;
-
-                        if (bottom != top)
-                            for (int x = right - 1; x >= left; x--)
-                                orderIndex[x * height + top] = idx++;
-
-                        if (left != right)
-                            for (int y = top - 1; y > bottom; y--)
-                                orderIndex[left * height + y] = idx++;
-
-                        left++; right--; bottom++; top--;
-                    }
-                }
-                break;
-
-            case TileAnimOrder.RandomStable:
-                {
-                    // stable pseudo-random based on coords (same every spawn)
-                    // We generate scores and sort by score.
-                    var pairs = new List<(int id, int score)>(total);
-                    for (int file = 0; file < width; file++)
+                    bool bottomToTop = (file % 2 == 0);
+                    if (bottomToTop)
                     {
                         for (int rank = 0; rank < height; rank++)
-                        {
-                            int id = file * height + rank;
-                            int score = Hash(file, rank);
-                            pairs.Add((id, score));
-                        }
+                            orderIndex[file * height + rank] = idx++;
                     }
-                    pairs.Sort((a, b) => a.score.CompareTo(b.score));
-                    for (int i = 0; i < pairs.Count; i++)
-                        orderIndex[pairs[i].id] = i;
+                    else
+                    {
+                        for (int rank = height - 1; rank >= 0; rank--)
+                            orderIndex[file * height + rank] = idx++;
+                    }
                 }
-                break;
+            }
+            break;
+
+            case TileAnimOrder.SpiralInward:
+            {
+                int idx = 0;
+                int left = 0, right = width - 1, bottom = 0, top = height - 1;
+
+                while (left <= right && bottom <= top)
+                {
+                    for (int x = left; x <= right; x++)
+                        orderIndex[x * height + bottom] = idx++;
+
+                    for (int y = bottom + 1; y <= top; y++)
+                        orderIndex[right * height + y] = idx++;
+
+                    if (bottom != top)
+                        for (int x = right - 1; x >= left; x--)
+                            orderIndex[x * height + top] = idx++;
+
+                    if (left != right)
+                        for (int y = top - 1; y > bottom; y--)
+                            orderIndex[left * height + y] = idx++;
+
+                    left++; right--; bottom++; top--;
+                }
+            }
+            break;
+
+            case TileAnimOrder.RandomStable:
+            {
+                var pairs = new List<(int id, int score)>(total);
+                for (int file = 0; file < width; file++)
+                {
+                    for (int rank = 0; rank < height; rank++)
+                    {
+                        int id = file * height + rank;
+                        int score = Hash(file, rank);
+                        pairs.Add((id, score));
+                    }
+                }
+                pairs.Sort((a, b) => a.score.CompareTo(b.score));
+                for (int i = 0; i < pairs.Count; i++)
+                    orderIndex[pairs[i].id] = i;
+            }
+            break;
         }
 
         return orderIndex;

@@ -30,6 +30,7 @@ public class ChessGameController : MonoBehaviour
 
     void Awake()
     {
+        
         DOTween.SetTweensCapacity(1000, 100);
 
         if (boardGenerator == null) boardGenerator = FindObjectOfType<BoardGeneratorFixed>();
@@ -43,6 +44,10 @@ public class ChessGameController : MonoBehaviour
 
         if (executor != null && executor.board == null)
             executor.board = board;
+// Force highest quality to match Editor while diagnosing build mismatch
+
+
+            
     }
 
     void Start()
@@ -110,10 +115,11 @@ public class ChessGameController : MonoBehaviour
             pieceInitializer.ClearPiecesOnly();
             yield return null; // let Destroy() remove colliders
         }
-
+        
         // 2) Tiles
         if (boardGenerator != null)
         {
+            
             boardGenerator.GenerateBoard();
             yield return null; // let tile colliders exist
         }
