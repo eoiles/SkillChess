@@ -826,9 +826,16 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   pieceInitializer: {fileID: 699288748}
   gameController: {fileID: 533190414}
+  folder: Assets/Data
+  autoRefreshInEditor: 1
   textAsset: {fileID: 4900000, guid: ea6fd36d75f213543b28789a6e342447, type: 3}
-  filePath: position.fen
-  useStreamingAssetsPath: 1
+  options:
+  - {fileID: 4900000, guid: 8e99bfe71ce2745418c3c670d7e15c0d, type: 3}
+  - {fileID: 4900000, guid: ea6fd36d75f213543b28789a6e342447, type: 3}
+  - {fileID: 4900000, guid: 59c49c8268201c942aa30c17d63b86a4, type: 3}
+  - {fileID: 4900000, guid: 7b2d556c8e4bfdf44b2fc2278db0704d, type: 3}
+  - {fileID: 4900000, guid: 6aaccb49bbbfa774ab5b00529da06e73, type: 3}
+  selectedIndex: 1
   format: 0
   clearOldPieces: 1
   applySideToMoveFromFEN: 1
