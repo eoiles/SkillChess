@@ -1,3 +1,4 @@
+// ChessUIController.cs
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
@@ -9,6 +10,16 @@ public class ChessUIController : MonoBehaviour
     public Text statusText;
     public Button restartButton;
 
+    // --- Unity 2023+ safe find helper (avoids CS0618) ---
+    static T FindAny<T>() where T : Object
+    {
+#if UNITY_2023_1_OR_NEWER
+        return Object.FindAnyObjectByType<T>();
+#else
+        return Object.FindObjectOfType<T>();
+#endif
+    }
+
     public void EnsureUI(System.Action onRestart)
     {
         if (turnText != null && statusText != null && restartButton != null)
@@ -18,7 +29,7 @@ public class ChessUIController : MonoBehaviour
             return;
         }
 
-        if (FindObjectOfType<EventSystem>() == null)
+        if (FindAny<EventSystem>() == null)
         {
             var es = new GameObject("EventSystem");
             es.AddComponent<EventSystem>();

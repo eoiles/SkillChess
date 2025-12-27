@@ -1,3 +1,4 @@
+// ChessInputController.cs
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -17,12 +18,22 @@ public class ChessInputController : MonoBehaviour
     PieceSelectable selectedSelectable;
     Dictionary<string, ChessMove> allowedMoves = new Dictionary<string, ChessMove>(32);
 
+    // --- Unity 2023+ safe find helpers (avoids CS0618) ---
+    static T FindFirst<T>() where T : Object
+    {
+#if UNITY_2023_1_OR_NEWER
+        return Object.FindFirstObjectByType<T>();
+#else
+        return Object.FindObjectOfType<T>();
+#endif
+    }
+
     void Awake()
     {
         if (cam == null) cam = Camera.main;
-        if (board == null) board = FindObjectOfType<ChessBoardIndex>();
-        if (game == null) game = FindObjectOfType<ChessGameController>();
-        if (pieceInitializer == null) pieceInitializer = FindObjectOfType<PieceInitializer>();
+        if (board == null) board = FindFirst<ChessBoardIndex>();
+        if (game == null) game = FindFirst<ChessGameController>();
+        if (pieceInitializer == null) pieceInitializer = FindFirst<PieceInitializer>();
     }
 
     void OnEnable()
@@ -42,12 +53,11 @@ public class ChessInputController : MonoBehaviour
 
     void OnPiecesInitialized()
     {
-        // Ensure we don't keep references to destroyed pieces after restart.
         Deselect();
 
         // Re-find in case objects were recreated / references changed.
-        if (board == null) board = FindObjectOfType<ChessBoardIndex>();
-        if (game == null) game = FindObjectOfType<ChessGameController>();
+        if (board == null) board = FindFirst<ChessBoardIndex>();
+        if (game == null) game = FindFirst<ChessGameController>();
     }
 
     void Update()
@@ -60,7 +70,7 @@ public class ChessInputController : MonoBehaviour
 
     void HandleClick()
     {
-        // Prevent the "Restart" click from also raycasting the 3D world.
+        // Prevent UI clicks from raycasting 3D world.
         if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
             return;
 

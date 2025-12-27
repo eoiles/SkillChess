@@ -1,3 +1,4 @@
+// PieceInitializer.cs
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -151,6 +152,7 @@ public class PieceInitializer : MonoBehaviour
         initRoutine = null;
     }
 
+    // ---------------- Internal spawn request ----------------
     struct SpawnRequest
     {
         public GameObject prefab;
@@ -496,5 +498,96 @@ public class PieceInitializer : MonoBehaviour
             b.size.y / piece.transform.lossyScale.y,
             b.size.z / piece.transform.lossyScale.z
         );
+    }
+
+    // =====================================================================
+    // PUBLIC API FOR CUSTOM INITIAL POSITIONS (used by importer component)
+    // =====================================================================
+
+    [System.Serializable]
+    public struct PiecePlacement
+    {
+        public string square;      // "A1".."H8"
+        public PieceColor color;   // White/Black
+        public PieceType type;     // Pawn/Rook/Knight/Bishop/Queen/King
+
+        public PiecePlacement(string sq, PieceColor c, PieceType t)
+        {
+            square = sq;
+            color = c;
+            type = t;
+        }
+    }
+
+    public GameObject GetPrefab(PieceColor color, PieceType type)
+    {
+        if (color == PieceColor.White)
+        {
+            switch (type)
+            {
+                case PieceType.Pawn:   return whitePawn;
+                case PieceType.Rook:   return whiteRook;
+                case PieceType.Knight: return whiteKnight;
+                case PieceType.Bishop: return whiteBishop;
+                case PieceType.Queen:  return whiteQueen;
+                case PieceType.King:   return whiteKing;
+            }
+        }
+        else
+        {
+            switch (type)
+            {
+                case PieceType.Pawn:   return blackPawn;
+                case PieceType.Rook:   return blackRook;
+                case PieceType.Knight: return blackKnight;
+                case PieceType.Bishop: return blackBishop;
+                case PieceType.Queen:  return blackQueen;
+                case PieceType.King:   return blackKing;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Clears (optional) and spawns exactly these placements (ordered by your spawnOrder).
+    /// </summary>
+    public void InitializeFromPlacements(IEnumerable<PiecePlacement> placements, bool clearOld = true)
+    {
+        if (initRoutine != null) StopCoroutine(initRoutine);
+        initRoutine = StartCoroutine(InitializeFromPlacementsRoutine(placements, clearOld));
+    }
+
+    IEnumerator InitializeFromPlacementsRoutine(IEnumerable<PiecePlacement> placements, bool clearOld)
+    {
+        EnsureRefs();
+        CacheTiles();
+
+        if (clearOld)
+        {
+            ClearPiecesInternal();
+            if (Application.isPlaying)
+                yield return null;
+        }
+
+        spawnIndex = 0;
+
+        var requests = new List<SpawnRequest>(64);
+        foreach (var p in placements)
+        {
+            var prefab = GetPrefab(p.color, p.type);
+            var parent = (p.color == PieceColor.White) ? whitePiecesParent : blackPiecesParent;
+            requests.Add(new SpawnRequest(prefab, p.square, p.color, p.type, parent));
+        }
+
+        ApplyOrder(requests);
+
+        for (int i = 0; i < requests.Count; i++)
+        {
+            var r = requests[i];
+            Spawn(r.prefab, r.square, r.color, r.type, r.parent);
+        }
+
+        OnPiecesInitialized?.Invoke();
+        initRoutine = null;
     }
 }

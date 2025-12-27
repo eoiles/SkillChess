@@ -1,3 +1,4 @@
+// ChessBoardIndex.cs
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -8,6 +9,19 @@ public class ChessBoardIndex : MonoBehaviour
     public Transform tilesRoot;
 
     Dictionary<string, TileView> tilesByName = new Dictionary<string, TileView>(64);
+
+    // --- Unity 2023+ safe find helpers (avoids CS0618) ---
+    static T[] FindAll<T>(bool includeInactive) where T : Object
+    {
+#if UNITY_2023_1_OR_NEWER
+        return Object.FindObjectsByType<T>(
+            includeInactive ? FindObjectsInactive.Include : FindObjectsInactive.Exclude,
+            FindObjectsSortMode.None
+        );
+#else
+        return Object.FindObjectsOfType<T>(includeInactive);
+#endif
+    }
 
     void Awake()
     {
@@ -33,7 +47,7 @@ public class ChessBoardIndex : MonoBehaviour
         // Fallback: find any TileView in scene
         if (tilesByName.Count < 60)
         {
-            var all = FindObjectsOfType<TileView>(true);
+            var all = FindAll<TileView>(true);
             foreach (var tv in all)
             {
                 if (tv == null) continue;
@@ -72,7 +86,7 @@ public class ChessBoardIndex : MonoBehaviour
     /// </summary>
     public List<PieceData> FindAllRootPieces()
     {
-        var all = FindObjectsOfType<PieceData>(true);
+        var all = FindAll<PieceData>(true);
         var roots = new List<PieceData>(all.Length);
 
         for (int i = 0; i < all.Length; i++)
@@ -101,11 +115,8 @@ public class ChessBoardIndex : MonoBehaviour
             if (!ChessMoveGenerator.TryParseSquare(p.currentSquare, out int f, out int r)) continue;
             if (!ChessMoveGenerator.InBounds(f, r)) continue;
 
-            // Diagnostic: two pieces claim same square
             if (occ[f, r] != null && occ[f, r] != p)
-            {
                 Debug.LogError($"Two pieces claim square {p.currentSquare}: {occ[f, r].name} and {p.name}");
-            }
 
             occ[f, r] = p;
 

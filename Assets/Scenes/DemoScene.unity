@@ -563,6 +563,8 @@ MonoBehaviour:
   executor: {fileID: 533190415}
   pieceInitializer: {fileID: 699288748}
   ui: {fileID: 533190412}
+  positionLoader: {fileID: 699288750}
+  usePositionLoaderOnRestart: 1
   extraDelayAfterTiles: 0.05
   lockInputDuringMoveAnimation: 1
   sideToMove: 0
@@ -701,6 +703,7 @@ GameObject:
   - component: {fileID: 699288747}
   - component: {fileID: 699288749}
   - component: {fileID: 699288748}
+  - component: {fileID: 699288750}
   m_Layer: 0
   m_Name: Board
   m_TagString: Untagged
@@ -792,6 +795,7 @@ MonoBehaviour:
   roundPositions: 1
   roundTo: 0.01
   tileHighlightMaterial: {fileID: 15303, guid: 0000000000000000f000000000000000, type: 0}
+  forceTilesNotHighlightedOnSpawn: 1
   generateOnStart: 0
   animateTiles: 1
   tileSpawnEffect: 1
@@ -808,6 +812,27 @@ MonoBehaviour:
   punchAmount: 0.12
   punchVibrato: 10
   punchElasticity: 0.6
+--- !u!114 &699288750
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 699288746}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f795a92690e27414cbda8f3fa83d6a46, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  pieceInitializer: {fileID: 699288748}
+  gameController: {fileID: 533190414}
+  textAsset: {fileID: 4900000, guid: ea6fd36d75f213543b28789a6e342447, type: 3}
+  filePath: position.fen
+  useStreamingAssetsPath: 1
+  format: 0
+  clearOldPieces: 1
+  applySideToMoveFromFEN: 1
+  loadOnStart: 0
 --- !u!1 &832575517
 GameObject:
   m_ObjectHideFlags: 0

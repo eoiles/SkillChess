@@ -13,6 +13,10 @@ public class ChessGameController : MonoBehaviour
     public PieceInitializer pieceInitializer;
     public ChessUIController ui;
 
+    [Header("Optional: Position Loader (FEN/CSV)")]
+    public ChessPositionCSVParser positionLoader;
+    public bool usePositionLoaderOnRestart = true;
+
     [Header("Restart Timing")]
     [Min(0f)] public float extraDelayAfterTiles = 0.05f;
 
@@ -28,26 +32,35 @@ public class ChessGameController : MonoBehaviour
 
     bool isMoveInProgress = false;
 
+    // If a loader wants to set side-to-move (from FEN), it sets this before spawn.
+    PieceColor? pendingSideToMoveOverride = null;
+
+    // --- Unity 2023+ safe find helpers (avoids CS0618) ---
+    static T FindFirst<T>() where T : Object
+    {
+#if UNITY_2023_1_OR_NEWER
+        return Object.FindFirstObjectByType<T>();
+#else
+        return Object.FindObjectOfType<T>();
+#endif
+    }
+
     void Awake()
     {
-        
         DOTween.SetTweensCapacity(1000, 100);
 
-        if (boardGenerator == null) boardGenerator = FindObjectOfType<BoardGeneratorFixed>();
-        if (board == null) board = FindObjectOfType<ChessBoardIndex>();
-        if (executor == null) executor = FindObjectOfType<ChessMoveExecutor>();
-        if (pieceInitializer == null) pieceInitializer = FindObjectOfType<PieceInitializer>();
-        if (ui == null) ui = FindObjectOfType<ChessUIController>();
+        if (boardGenerator == null) boardGenerator = FindFirst<BoardGeneratorFixed>();
+        if (board == null) board = FindFirst<ChessBoardIndex>();
+        if (executor == null) executor = FindFirst<ChessMoveExecutor>();
+        if (pieceInitializer == null) pieceInitializer = FindFirst<PieceInitializer>();
+        if (ui == null) ui = FindFirst<ChessUIController>();
+        if (positionLoader == null) positionLoader = FindFirst<ChessPositionCSVParser>();
 
         if (ui == null) ui = gameObject.AddComponent<ChessUIController>();
         ui.EnsureUI(RestartGame);
 
         if (executor != null && executor.board == null)
             executor.board = board;
-// Force highest quality to match Editor while diagnosing build mismatch
-
-
-            
     }
 
     void Start()
@@ -67,22 +80,33 @@ public class ChessGameController : MonoBehaviour
             pieceInitializer.OnPiecesInitialized -= OnPiecesInitialized;
     }
 
+    // Called when PieceInitializer finishes spawning (including stagger/one-by-one animations)
     void OnPiecesInitialized()
     {
-        sideToMove = PieceColor.White;
+        // Always reset baseline state.
         lastMove = null;
         gameOver = false;
         isMoveInProgress = false;
+
+        // Apply pending side-to-move if loader requested it; otherwise default white.
+        sideToMove = pendingSideToMoveOverride ?? PieceColor.White;
+        pendingSideToMoveOverride = null;
 
         UpdateStatusMessage();
         RefreshUI();
     }
 
+    /// <summary>
+    /// Called by the position loader BEFORE it spawns pieces to set side-to-move after spawn completes.
+    /// </summary>
+    public void SetPendingSideToMoveOverride(PieceColor? side)
+    {
+        pendingSideToMoveOverride = side;
+    }
+
     public void RestartGame()
     {
-        // Ensure any in-flight tweens are stopped so state can’t “finish later”
         DOTween.KillAll(false);
-
         StopAllCoroutines();
         StartCoroutine(RestartRoutine());
     }
@@ -93,7 +117,7 @@ public class ChessGameController : MonoBehaviour
         RefreshUI();
 
         // Stop selection/highlights + (optional) stop clicks during restart
-        var input = FindObjectOfType<ChessInputController>();
+        var input = FindFirst<ChessInputController>();
         if (input != null)
         {
             input.Deselect();
@@ -102,10 +126,10 @@ public class ChessGameController : MonoBehaviour
 
         isMoveInProgress = false;
         gameOver = false;
-        sideToMove = PieceColor.White;
         lastMove = null;
+        pendingSideToMoveOverride = null;
 
-        // IMPORTANT: prevent auto-spawn from other scripts
+        // prevent auto-spawn from other scripts
         if (boardGenerator != null) boardGenerator.generateOnStart = false;
         if (pieceInitializer != null) pieceInitializer.autoInitializeOnStart = false;
 
@@ -115,11 +139,10 @@ public class ChessGameController : MonoBehaviour
             pieceInitializer.ClearPiecesOnly();
             yield return null; // let Destroy() remove colliders
         }
-        
+
         // 2) Tiles
         if (boardGenerator != null)
         {
-            
             boardGenerator.GenerateBoard();
             yield return null; // let tile colliders exist
         }
@@ -129,7 +152,7 @@ public class ChessGameController : MonoBehaviour
         if (tileAnim > 0f)
             yield return new WaitForSeconds(tileAnim + extraDelayAfterTiles);
 
-        // 4) Refresh board tile cache if needed (safe no-op if not implemented)
+        // 4) Refresh board tile cache if needed
         if (board != null)
         {
             board.SendMessage("RebuildTiles", SendMessageOptions.DontRequireReceiver);
@@ -137,9 +160,19 @@ public class ChessGameController : MonoBehaviour
             board.ClearAllTileHighlights();
         }
 
-        // 5) Pieces
-        if (pieceInitializer != null)
+        // 5) Pieces: either load from FEN/CSV (recommended) or standard setup
+        bool usedLoader = false;
+        if (usePositionLoaderOnRestart && positionLoader != null && positionLoader.isActiveAndEnabled)
+        {
+            // IMPORTANT: do not let loader clear pieces again, since we already cleared.
+            positionLoader.LoadAndApply(clearOldPiecesOverride: false, controller: this);
+            usedLoader = true;
+        }
+
+        if (!usedLoader && pieceInitializer != null)
+        {
             pieceInitializer.InitializePieces();
+        }
 
         // Re-enable input after pieces spawn
         if (input != null && lockInputDuringMoveAnimation)
@@ -165,10 +198,6 @@ public class ChessGameController : MonoBehaviour
         return map;
     }
 
-    /// <summary>
-    /// Validates move and starts an animation coroutine (or instant move, depending on executor settings).
-    /// Returns true if the move was accepted/started.
-    /// </summary>
     public bool TryApplyMove(PieceData movingPiece, ChessMove move)
     {
         if (board == null || executor == null) return false;
@@ -189,27 +218,29 @@ public class ChessGameController : MonoBehaviour
     {
         isMoveInProgress = true;
 
-        // Stop selection/highlights and lock input during animation
-        var input = FindObjectOfType<ChessInputController>();
+        var input = FindFirst<ChessInputController>();
         if (input != null)
         {
             input.Deselect();
             if (lockInputDuringMoveAnimation) input.enabled = false;
         }
+
         if (board != null) board.ClearAllTileHighlights();
 
         PieceData resultPiece = movingPiece;
 
-        // If you didn’t paste the animated executor yet, this still works because ExecuteMoveAnimated
-        // falls back to instant when animateMoves = false.
-        Sequence seq = executor.ExecuteMoveAnimated(movingPiece, legalMove, lastMove, pd => resultPiece = pd);
+        Sequence seq = executor.ExecuteMoveAnimated(
+            movingPiece,
+            legalMove,
+            lastMove,
+            pd => resultPiece = pd
+        );
 
         if (seq != null)
             yield return seq.WaitForCompletion();
         else
             yield return null;
 
-        // Apply turn/state AFTER movement finished (prevents mid-animation logic/input issues)
         lastMove = legalMove;
         sideToMove = (sideToMove == PieceColor.White) ? PieceColor.Black : PieceColor.White;
 
@@ -218,7 +249,6 @@ public class ChessGameController : MonoBehaviour
 
         RefreshUI();
 
-        // Re-enable input
         if (input != null && lockInputDuringMoveAnimation)
             input.enabled = true;
 
