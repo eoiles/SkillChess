@@ -1,12 +1,16 @@
+// ChessMoveExecutor.cs
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using DG.Tweening;
-using System;
 
 public class ChessMoveExecutor : MonoBehaviour
 {
     [Header("Refs")]
     public ChessBoardIndex board;
+
+    [Header("Feedback (FEEL)")]
+    public ChessFeedbackHub fx;
 
     [Header("Placement")]
     public bool preservePieceY = true;
@@ -27,9 +31,9 @@ public class ChessMoveExecutor : MonoBehaviour
     public int jumpNumJumps = 1;
 
     [Header("DOTween - Capture (Sink + Vanish)")]
-    public bool animateCaptures = true;           // if false -> destroy immediately (no visual)
-    public float captureAnimDuration = 0.18f;     // sink+vanish duration
-    public float captureSinkDistance = 0.35f;     // how far down it sinks
+    public bool animateCaptures = true;
+    public float captureAnimDuration = 0.18f;
+    public float captureSinkDistance = 0.35f;
     public Ease captureEase = Ease.InBack;
 
     [Header("DOTween - Capture (optional spin)")]
@@ -37,12 +41,8 @@ public class ChessMoveExecutor : MonoBehaviour
     public float captureSpinDegrees = 180f;
 
     [Header("DOTween - Capture timing")]
-    [Range(0f, 1f)] public float captureStartNormalized = 0.85f; // start capture near end of move when animating moves
+    [Range(0f, 1f)] public float captureStartNormalized = 0.85f;
 
-    /// <summary>
-    /// Animated move. Returns the Sequence so caller can WaitForCompletion().
-    /// onComplete receives the final PieceData (may be a new instance due to promotion).
-    /// </summary>
     public Sequence ExecuteMoveAnimated(
         PieceData movingPiece,
         ChessMove move,
@@ -61,7 +61,6 @@ public class ChessMoveExecutor : MonoBehaviour
             return DOTween.Sequence();
         }
 
-        // Fallback to instant if animation disabled
         if (!animateMoves)
         {
             var result = ExecuteMoveInstant(movingPiece, move, lastMove);
@@ -85,7 +84,7 @@ public class ChessMoveExecutor : MonoBehaviour
                 captured = occ[tf, tr];
         }
 
-        // Safety: don't "capture" same-color piece (shouldn't happen, but protects visuals)
+        // Safety
         if (captured != null && !move.isEnPassant && captured.color == movingPiece.color)
             captured = null;
 
@@ -114,20 +113,28 @@ public class ChessMoveExecutor : MonoBehaviour
             ResolveCastlingRook(movingPiece.color, move, out rook, out rookTo, out rookTargetPos);
         }
 
-        // Build sequence
         var seq = DOTween.Sequence();
 
-        // Capture visual (sink+vanish), delayed to start near end of the mover's travel
+        // FEEL: move started at mover position
+        seq.OnStart(() => fx?.PlayMoveAt(movingPiece.transform.position));
+
+        // Capture VFX timed near end of travel
         if (captured != null)
         {
             if (animateCaptures)
             {
                 float delay = Mathf.Max(0f, moveDuration * Mathf.Clamp01(captureStartNormalized));
+                Vector3 capPos = captured.transform.position;
+
+                // FEEL: capture VFX at captured piece position
+                seq.InsertCallback(delay, () => fx?.PlayCaptureAt(capPos));
+
                 var capSeq = BuildCaptureSinkVanishSequence(captured, delay);
                 seq.Join(capSeq);
             }
             else
             {
+                fx?.PlayCaptureAt(captured.transform.position);
                 Destroy(captured.gameObject);
             }
         }
@@ -137,7 +144,7 @@ public class ChessMoveExecutor : MonoBehaviour
             ? movingPiece.transform.DOJump(targetPos, jumpPower, jumpNumJumps, moveDuration).SetEase(moveEase)
             : movingPiece.transform.DOMove(targetPos, moveDuration).SetEase(moveEase);
 
-        // Prevent selecting the moving piece mid-flight
+        // Prevent selecting mid-flight
         var movingCol = movingPiece.GetComponentInChildren<Collider>();
         if (movingCol != null) movingCol.enabled = false;
 
@@ -152,14 +159,12 @@ public class ChessMoveExecutor : MonoBehaviour
             seq.Join(rook.transform.DOMove(rookTargetPos, moveDuration).SetEase(moveEase));
         }
 
-        // Apply state at the end (so visuals and logic align)
+        // Apply state at the end
         seq.OnComplete(() =>
         {
-            // Update moving piece state
             movingPiece.currentSquare = move.to;
             movingPiece.hasMoved = true;
 
-            // Update rook state (if castling)
             if (rook != null && rookTo != null)
             {
                 rook.currentSquare = rookTo;
@@ -169,17 +174,18 @@ public class ChessMoveExecutor : MonoBehaviour
                 if (rookCol2 != null) rookCol2.enabled = true;
             }
 
-            // Re-enable moving piece collider
             var col2 = movingPiece.GetComponentInChildren<Collider>();
             if (col2 != null) col2.enabled = true;
 
-            // Promotion (auto-queen)
             PieceData resultPiece = movingPiece;
             if (move.isPromotion && movingPiece.type == PieceType.Pawn)
             {
                 resultPiece = PromotePawnToQueen(movingPiece);
                 if (resultPiece != null)
                     resultPiece.transform.position = targetPos;
+
+                // Promotion FX at target square
+                fx?.PlayPromote();
             }
 
             onComplete?.Invoke(resultPiece);
@@ -188,10 +194,11 @@ public class ChessMoveExecutor : MonoBehaviour
         return seq;
     }
 
-    // Your existing synchronous behavior, updated to support capture sink+vanish without breaking logic.
-    // NOTE: If you rely on instant moves, we "logically remove" captured piece immediately by invalidating its square.
     public PieceData ExecuteMoveInstant(PieceData movingPiece, ChessMove move, ChessMove? lastMove)
     {
+        if (movingPiece != null)
+            fx?.PlayMoveAt(movingPiece.transform.position);
+
         if (board == null)
         {
             Debug.LogError("ChessMoveExecutor: board reference missing.");
@@ -201,16 +208,14 @@ public class ChessMoveExecutor : MonoBehaviour
 
         var occ = board.BuildOccupancy(out _);
 
-        // --- Capture
+        // Capture
         if (move.isEnPassant)
         {
             if (ChessMoveGenerator.TryParseSquare(move.enPassantCapturedSquare, out int cf, out int cr))
             {
                 var captured = occ[cf, cr];
                 if (captured != null)
-                {
                     HandleCaptureInstantButAnimatedIfEnabled(captured);
-                }
             }
         }
         else
@@ -219,13 +224,11 @@ public class ChessMoveExecutor : MonoBehaviour
             {
                 var captured = occ[tf, tr];
                 if (captured != null && captured.color != movingPiece.color)
-                {
                     HandleCaptureInstantButAnimatedIfEnabled(captured);
-                }
             }
         }
 
-        // --- Move to tile
+        // Move to tile
         if (!board.TryGetTile(move.to, out var targetTile))
         {
             Debug.LogError($"ChessMoveExecutor: Tile not found {move.to}");
@@ -242,41 +245,36 @@ public class ChessMoveExecutor : MonoBehaviour
         movingPiece.currentSquare = move.to;
         movingPiece.hasMoved = true;
 
-        // --- Castling rook
         if (move.isCastleKingSide || move.isCastleQueenSide)
             ExecuteCastleRookMove(movingPiece.color, move);
 
-        // --- Promotion (auto-queen)
         if (move.isPromotion && movingPiece.type == PieceType.Pawn)
+        {
             movingPiece = PromotePawnToQueen(movingPiece);
+            fx?.PlayPromote();
+        }
 
         return movingPiece;
     }
 
-    // Builds a DOTween sequence that sinks and vanishes a captured piece, then destroys it.
-    // delay is used for animated moves so the capture happens as the attacker arrives.
     Sequence BuildCaptureSinkVanishSequence(PieceData captured, float delay)
     {
         var seq = DOTween.Sequence();
         if (captured == null) return seq;
 
-        // Stop any existing tweens on the captured piece
         captured.transform.DOKill(false);
 
-        // Prevent clicks/selection immediately
         var col = captured.GetComponentInChildren<Collider>();
         if (col != null) col.enabled = false;
 
         var selectable = captured.GetComponent<PieceSelectable>();
         if (selectable != null) selectable.enabled = false;
 
-        // Ensure it no longer participates in logic if someone rebuilds occupancy before Destroy completes
         captured.currentSquare = null;
         captured.enabled = false;
 
         Vector3 startPos = captured.transform.position;
         Vector3 sinkPos = startPos + Vector3.down * captureSinkDistance;
-        Vector3 startScale = captured.transform.localScale;
 
         if (delay > 0f)
             seq.AppendInterval(delay);
@@ -298,12 +296,10 @@ public class ChessMoveExecutor : MonoBehaviour
                 Destroy(captured.gameObject);
         });
 
-        // If something interrupts, try to clean up
         seq.OnKill(() =>
         {
             if (captured != null && captured.gameObject != null)
             {
-                // Keep it removed logically
                 captured.currentSquare = null;
                 captured.enabled = false;
             }
@@ -312,11 +308,11 @@ public class ChessMoveExecutor : MonoBehaviour
         return seq;
     }
 
-    // For instant moves: keep rules/logic correct by immediately removing the piece from the board logic,
-    // but still play the sink+vanish tween if enabled.
     void HandleCaptureInstantButAnimatedIfEnabled(PieceData captured)
     {
         if (captured == null) return;
+
+        fx?.PlayCaptureAt(captured.transform.position);
 
         if (!animateCaptures)
         {
@@ -324,7 +320,6 @@ public class ChessMoveExecutor : MonoBehaviour
             return;
         }
 
-        // Play immediately (no delay)
         BuildCaptureSinkVanishSequence(captured, 0f);
     }
 

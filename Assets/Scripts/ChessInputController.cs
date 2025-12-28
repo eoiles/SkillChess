@@ -11,6 +11,9 @@ public class ChessInputController : MonoBehaviour
     public ChessGameController game;
     public PieceInitializer pieceInitializer;
 
+    [Header("Feedback (FEEL)")]
+    public ChessFeedbackHub fx;
+
     [Header("Raycast")]
     public LayerMask raycastMask = ~0;
 
@@ -18,7 +21,6 @@ public class ChessInputController : MonoBehaviour
     PieceSelectable selectedSelectable;
     Dictionary<string, ChessMove> allowedMoves = new Dictionary<string, ChessMove>(32);
 
-    // --- Unity 2023+ safe find helpers (avoids CS0618) ---
     static T FindFirst<T>() where T : Object
     {
 #if UNITY_2023_1_OR_NEWER
@@ -34,6 +36,7 @@ public class ChessInputController : MonoBehaviour
         if (board == null) board = FindFirst<ChessBoardIndex>();
         if (game == null) game = FindFirst<ChessGameController>();
         if (pieceInitializer == null) pieceInitializer = FindFirst<PieceInitializer>();
+        if (fx == null) fx = FindFirst<ChessFeedbackHub>();
     }
 
     void OnEnable()
@@ -55,9 +58,9 @@ public class ChessInputController : MonoBehaviour
     {
         Deselect();
 
-        // Re-find in case objects were recreated / references changed.
         if (board == null) board = FindFirst<ChessBoardIndex>();
         if (game == null) game = FindFirst<ChessGameController>();
+        if (fx == null) fx = FindFirst<ChessFeedbackHub>();
     }
 
     void Update()
@@ -70,7 +73,6 @@ public class ChessInputController : MonoBehaviour
 
     void HandleClick()
     {
-        // Prevent UI clicks from raycasting 3D world.
         if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject())
             return;
 
@@ -122,6 +124,8 @@ public class ChessInputController : MonoBehaviour
         if (selectedSelectable != null)
             selectedSelectable.SetSelected(true);
 
+        fx?.PlaySelect();
+
         allowedMoves = game.GetLegalMoveMap(selectedPiece);
         HighlightAllowedTiles();
     }
@@ -132,7 +136,10 @@ public class ChessInputController : MonoBehaviour
         if (string.IsNullOrEmpty(targetSquare)) return;
 
         if (!allowedMoves.TryGetValue(targetSquare, out var move))
+        {
+            fx?.PlayIllegal();
             return;
+        }
 
         bool moved = game.TryApplyMove(selectedPiece, move);
         if (moved)

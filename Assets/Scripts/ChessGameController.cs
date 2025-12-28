@@ -13,6 +13,9 @@ public class ChessGameController : MonoBehaviour
     public PieceInitializer pieceInitializer;
     public ChessUIController ui;
 
+    [Header("Feedback (FEEL)")]
+    public ChessFeedbackHub fx;
+
     [Header("Optional: Position Loader (FEN/CSV)")]
     public ChessPositionCSVParser positionLoader;
     public bool usePositionLoaderOnRestart = true;
@@ -31,11 +34,8 @@ public class ChessGameController : MonoBehaviour
     public string statusMessage = "Waiting for pieces...";
 
     bool isMoveInProgress = false;
-
-    // If a loader wants to set side-to-move (from FEN), it sets this before spawn.
     PieceColor? pendingSideToMoveOverride = null;
 
-    // --- Unity 2023+ safe find helpers (avoids CS0618) ---
     static T FindFirst<T>() where T : Object
     {
 #if UNITY_2023_1_OR_NEWER
@@ -55,6 +55,9 @@ public class ChessGameController : MonoBehaviour
         if (pieceInitializer == null) pieceInitializer = FindFirst<PieceInitializer>();
         if (ui == null) ui = FindFirst<ChessUIController>();
         if (positionLoader == null) positionLoader = FindFirst<ChessPositionCSVParser>();
+
+        if (fx == null) fx = FindFirst<ChessFeedbackHub>();
+        if (executor != null && executor.fx == null) executor.fx = fx;
 
         if (ui == null) ui = gameObject.AddComponent<ChessUIController>();
         ui.EnsureUI(RestartGame);
@@ -80,15 +83,12 @@ public class ChessGameController : MonoBehaviour
             pieceInitializer.OnPiecesInitialized -= OnPiecesInitialized;
     }
 
-    // Called when PieceInitializer finishes spawning (including stagger/one-by-one animations)
     void OnPiecesInitialized()
     {
-        // Always reset baseline state.
         lastMove = null;
         gameOver = false;
         isMoveInProgress = false;
 
-        // Apply pending side-to-move if loader requested it; otherwise default white.
         sideToMove = pendingSideToMoveOverride ?? PieceColor.White;
         pendingSideToMoveOverride = null;
 
@@ -96,9 +96,6 @@ public class ChessGameController : MonoBehaviour
         RefreshUI();
     }
 
-    /// <summary>
-    /// Called by the position loader BEFORE it spawns pieces to set side-to-move after spawn completes.
-    /// </summary>
     public void SetPendingSideToMoveOverride(PieceColor? side)
     {
         pendingSideToMoveOverride = side;
@@ -106,6 +103,8 @@ public class ChessGameController : MonoBehaviour
 
     public void RestartGame()
     {
+        fx?.PlayRestart();
+
         DOTween.KillAll(false);
         StopAllCoroutines();
         StartCoroutine(RestartRoutine());
@@ -116,7 +115,6 @@ public class ChessGameController : MonoBehaviour
         statusMessage = "Restarting...";
         RefreshUI();
 
-        // Stop selection/highlights + (optional) stop clicks during restart
         var input = FindFirst<ChessInputController>();
         if (input != null)
         {
@@ -129,30 +127,25 @@ public class ChessGameController : MonoBehaviour
         lastMove = null;
         pendingSideToMoveOverride = null;
 
-        // prevent auto-spawn from other scripts
         if (boardGenerator != null) boardGenerator.generateOnStart = false;
         if (pieceInitializer != null) pieceInitializer.autoInitializeOnStart = false;
 
-        // 1) Clear pieces first so nothing overlaps
         if (pieceInitializer != null)
         {
             pieceInitializer.ClearPiecesOnly();
-            yield return null; // let Destroy() remove colliders
+            yield return null;
         }
 
-        // 2) Tiles
         if (boardGenerator != null)
         {
             boardGenerator.GenerateBoard();
-            yield return null; // let tile colliders exist
+            yield return null;
         }
 
-        // 3) Wait for tile animation to finish BEFORE pieces
         float tileAnim = boardGenerator != null ? boardGenerator.GetTotalTileAnimTime() : 0f;
         if (tileAnim > 0f)
             yield return new WaitForSeconds(tileAnim + extraDelayAfterTiles);
 
-        // 4) Refresh board tile cache if needed
         if (board != null)
         {
             board.SendMessage("RebuildTiles", SendMessageOptions.DontRequireReceiver);
@@ -160,11 +153,9 @@ public class ChessGameController : MonoBehaviour
             board.ClearAllTileHighlights();
         }
 
-        // 5) Pieces: either load from FEN/CSV (recommended) or standard setup
         bool usedLoader = false;
         if (usePositionLoaderOnRestart && positionLoader != null && positionLoader.isActiveAndEnabled)
         {
-            // IMPORTANT: do not let loader clear pieces again, since we already cleared.
             positionLoader.LoadAndApply(clearOldPiecesOverride: false, controller: this);
             usedLoader = true;
         }
@@ -174,7 +165,6 @@ public class ChessGameController : MonoBehaviour
             pieceInitializer.InitializePieces();
         }
 
-        // Re-enable input after pieces spawn
         if (input != null && lockInputDuringMoveAnimation)
             input.enabled = true;
     }
@@ -245,8 +235,27 @@ public class ChessGameController : MonoBehaviour
         sideToMove = (sideToMove == PieceColor.White) ? PieceColor.Black : PieceColor.White;
 
         EvaluateEndConditions();
-        if (!gameOver) UpdateStatusMessage();
 
+        // FEEL: check / mate / stalemate
+        if (board != null)
+        {
+            var occ = board.BuildOccupancy(out bool hasBothKings);
+            if (hasBothKings)
+            {
+                bool inCheck = ChessRules.IsKingInCheck(sideToMove, occ);
+                if (gameOver)
+                {
+                    if (inCheck) fx?.PlayCheckmate();
+                    else fx?.PlayStalemate();
+                }
+                else
+                {
+                    if (inCheck) fx?.PlayCheck();
+                }
+            }
+        }
+
+        if (!gameOver) UpdateStatusMessage();
         RefreshUI();
 
         if (input != null && lockInputDuringMoveAnimation)
