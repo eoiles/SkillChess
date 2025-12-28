@@ -73,3 +73,13 @@ crashlytics-build.properties
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# Ignore DOTween Pro (common install locations)
+/[Aa]ssets/DOTween Pro/
+/[Aa]ssets/DOTweenPro/
+/[Aa]ssets/Demigiant/DOTween/
+/[Pp]ackages/*dotween*
+
+# Ignore Feel package (common install locations)
+/[Aa]ssets/Feel/
+/[Pp]ackages/*feel*
